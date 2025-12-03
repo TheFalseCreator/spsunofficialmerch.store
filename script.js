@@ -1,6 +1,6 @@
 // script.js - drop into your repo (replace old file)
 // Put your deployed web app URL here:
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzZ_GR310jAtdCVSOUeVu9DQgrYQUV0T_Oy92ojctZzm-1U3Le4LK7v8lCFrlF7gRLLyg/exec'; // <-- replace this
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzZ_GR310jAtdCVSOUeVu9DQgrYQUV0T_Oy92ojctZzm-1U3Le4LK7v8lCFrlF7gRLLyg/exec'; // <-- your web app URL
 
 /* helpers */
 const popup = () => document.getElementById('quickOrderPopup');
@@ -69,35 +69,53 @@ async function handleSubmit(e){
   if(Date.now()-last < 7000){ alert('Please wait a moment before another order.'); if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Place Order'; } return; }
   localStorage.setItem('lastQuickOrderAt', Date.now());
 
-  // Developer safety checks
-  if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('YOUR_DEPLOYMENT_ID')) {
-    alert('Set GOOGLE_SCRIPT_URL in script.js to your deployed Apps Script web app URL (step 2).');
+  // Developer safety: quick sanity
+  if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('YOUR_DEPLOYMENT_ID') || GOOGLE_SCRIPT_URL.trim() === '') {
+    alert('Set GOOGLE_SCRIPT_URL in script.js to your deployed Apps Script web app URL.');
     if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Place Order'; }
     return;
   }
 
+  // Build form-encoded params to avoid preflight (application/x-www-form-urlencoded)
+  const params = new URLSearchParams();
+  params.append('product', payload.product);
+  params.append('name', payload.name);
+  params.append('class', payload.class);
+  params.append('admission', payload.admission);
+  params.append('phone', payload.phone);
+
   try {
+    console.log('Posting order to:', GOOGLE_SCRIPT_URL);
     const res = await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: params // browser sends as application/x-www-form-urlencoded by default
     });
 
+    // If the server returns non-2xx, res.ok will be false
     if (!res.ok) {
       throw new Error('Server responded with status ' + res.status);
     }
 
-    // parse JSON from server
-    const data = await res.json();
+    // Try to parse JSON (Apps Script returns JSON)
+    let data;
+    try {
+      data = await res.json();
+    } catch (jsonErr) {
+      // If parsing fails, still treat as failure because we expect JSON {status:'ok'}
+      throw new Error('Invalid JSON response from server');
+    }
+
     if (data && data.status === 'ok') {
+      // Success UI
       const f = form(); if(f) f.hidden = true;
       const s = successBox(); if(s) s.hidden = false;
       setTimeout(() => {
         if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Place Order'; }
       }, 800);
       setTimeout(closeQuickOrder, 1400);
+      console.log('Order successful:', data);
     } else {
-      throw new Error(data && data.message ? data.message : 'Server rejected request');
+      throw new Error((data && data.message) ? data.message : 'Server rejected request');
     }
 
   } catch (err) {
