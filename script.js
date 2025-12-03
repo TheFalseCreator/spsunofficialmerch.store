@@ -1,124 +1,145 @@
-// Replace this with your deployed Google Apps Script Web App URL:
-const GOOGLE_SCRIPT_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE';
+/* --------------- Replace this with your Apps Script URL --------------- */
+const GOOGLE_SCRIPT_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'; // <-- put your web app URL here
 
-/* Helpers for modal and scrolling */
+/* Quick popup element refs */
+const quickPopup = () => document.getElementById('quickOrderPopup');
+const quickForm = () => document.getElementById('quickOrderForm');
+const quickSuccess = () => document.getElementById('quickSuccess');
+const quickSubmitBtn = () => document.getElementById('quickSubmit');
+
+/* Scroll helper */
 function scrollToProducts() {
   const el = document.getElementById('products');
   if (el) el.scrollIntoView({ behavior: 'smooth' });
 }
 
-function openOrderModal(productName) {
-  const modal = document.getElementById('orderModal');
-  if (!modal) return;
-  modal.style.display = 'block';
-  modal.setAttribute('aria-hidden', 'false');
-
-  const productField = document.getElementById('productName');
-  if (productField) productField.value = productName || '';
-
-  // show form, hide success
-  const form = document.getElementById('orderForm');
-  const success = document.getElementById('successMessage');
-  if (form) form.style.display = 'block';
-  if (success) success.style.display = 'none';
-
+/* Open the compact quick order popup and prefill product */
+function openQuickOrder(productName = '') {
+  const popup = quickPopup();
+  if (!popup) return;
+  popup.setAttribute('aria-hidden', 'false');
+  // put product name into hidden field
+  const hidden = document.getElementById('quickProduct');
+  if (hidden) hidden.value = productName;
+  // reset form view
+  const form = quickForm();
+  if (form) {
+    form.hidden = false;
+    form.reset();
+  }
+  const success = quickSuccess();
+  if (success) success.hidden = true;
   document.body.style.overflow = 'hidden';
 }
 
-function closeOrderModal() {
-  const modal = document.getElementById('orderModal');
-  if (!modal) return;
-  modal.style.display = 'none';
-  modal.setAttribute('aria-hidden', 'true');
-
-  const form = document.getElementById('orderForm');
-  if (form) form.reset();
-
+/* Close the popup */
+function closeQuickOrder() {
+  const popup = quickPopup();
+  if (!popup) return;
+  popup.setAttribute('aria-hidden', 'true');
   document.body.style.overflow = 'auto';
 }
 
-/* Window click to close modal when clicking outside */
-window.onclick = function(event) {
-  const modal = document.getElementById('orderModal');
-  if (event.target === modal) {
-    closeOrderModal();
+/* Click outside to close (optional) */
+document.addEventListener('click', (e) => {
+  const popup = quickPopup();
+  if (!popup) return;
+  if (popup.getAttribute('aria-hidden') === 'false') {
+    const inner = popup.querySelector('.quick-popup-inner');
+    if (inner && !inner.contains(e.target) && !e.target.matches('.product-btn')) {
+      closeQuickOrder();
+    }
   }
-};
+});
 
-/* Form submission */
-async function submitOrder(event) {
-  if (event) event.preventDefault();
-
-  const submitBtn = document.getElementById('submitBtn');
+/* Submit quick order */
+async function handleQuickSubmit(e) {
+  e.preventDefault();
+  const submitBtn = quickSubmitBtn();
   if (submitBtn) {
     submitBtn.disabled = true;
-    submitBtn.textContent = 'SUBMITTING...';
+    submitBtn.textContent = 'Placing...';
   }
 
-  const formData = {
+  // gather fields
+  const payload = {
     timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-    productName: (document.getElementById('productName') || {}).value || '',
-    size: (document.getElementById('size') || {}).value || '',
-    fullName: (document.getElementById('fullName') || {}).value || '',
-    admissionNumber: (document.getElementById('admissionNumber') || {}).value || '',
-    phoneNumber: (document.getElementById('phoneNumber') || {}).value || '',
-    class: (document.getElementById('class') || {}).value || ''
+    product: (document.getElementById('quickProduct') || {}).value || '',
+    name: (document.getElementById('qName') || {}).value || '',
+    class: (document.getElementById('qClass') || {}).value || '',
+    admission: (document.getElementById('qAdmission') || {}).value || '',
+    phone: (document.getElementById('qPhone') || {}).value || ''
   };
 
+  // basic client validation (phone length)
+  const phone = payload.phone.replace(/\D/g,'');
+  if (!/^\d{10}$/.test(phone)) {
+    alert('Please enter a valid 10-digit phone number.');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Place Order';
+    }
+    return;
+  }
+
+  // Optional: client-side simple rate limit
+  const last = Number(localStorage.getItem('lastQuickOrderAt') || 0);
+  if (Date.now() - last < 10_000) { // 10s throttle
+    alert('Please wait a few seconds before placing another order.');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Place Order';
+    }
+    return;
+  }
+  localStorage.setItem('lastQuickOrderAt', Date.now());
+
   try {
-    // Note: If your Apps Script is configured to allow CORS, remove 'mode: no-cors' and handle responses.
+    // If your Apps Script supports CORS and returns JSON, remove mode:'no-cors' to read response
     await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       mode: 'no-cors',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(formData)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
 
-    // show success and hide form
-    const form = document.getElementById('orderForm');
-    const success = document.getElementById('successMessage');
-    if (form) form.style.display = 'none';
-    if (success) success.style.display = 'block';
+    // show success message
+    const form = quickForm();
+    if (form) form.hidden = true;
+    const success = quickSuccess();
+    if (success) success.hidden = false;
 
+    // reset button / auto-close after delay
     setTimeout(() => {
-      closeOrderModal();
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Confirm Order';
+        submitBtn.textContent = 'Place Order';
       }
-    }, 3000);
+      // keep popup open so user sees success, then close
+      setTimeout(closeQuickOrder, 1200);
+    }, 800);
 
-  } catch (error) {
-    console.error('Error submitting order:', error);
-    alert('Order submitted! We will contact you soon.');
-    closeOrderModal();
+  } catch (err) {
+    console.error('Quick order error:', err);
+    alert('We could not place the order right now. Please try again later.');
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Confirm Order';
+      submitBtn.textContent = 'Place Order';
     }
   }
 }
 
-/* Attach submit handler after DOM loads */
+/* Attach handlers on DOM ready */
 document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('orderForm');
-  if (form) form.addEventListener('submit', submitOrder);
+  const form = quickForm();
+  if (form) form.addEventListener('submit', handleQuickSubmit);
 
-  // Smooth scroll for nav links
-  document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-    anchor.addEventListener('click', function (e) {
+  // smooth anchor scrolling
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', (e) => {
       e.preventDefault();
-      const target = document.querySelector(this.getAttribute('href'));
-      if (target) target.scrollIntoView({ behavior: 'smooth' });
+      const t = document.querySelector(a.getAttribute('href'));
+      if (t) t.scrollIntoView({ behavior: 'smooth' });
     });
-  });
-
-  // Parallax effect
-  window.addEventListener('scroll', () => {
-    const scrolled = window.pageYOffset;
-    const hero = document.querySelector('.hero');
-    if (hero) hero.style.transform = `translateY(${scrolled * 0.5}px)`;
   });
 });
