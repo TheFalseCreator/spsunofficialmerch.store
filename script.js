@@ -1,6 +1,5 @@
-// script.js - drop into your repo (replace old file)
-// Put your deployed web app URL here:
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzmmfEl_YmtAu7x0vrMPeX4lhmfQhnRxdAHpDGSXJwGEOMclejSSWSNiNE6vJJWs1z-sA/exec'; // <-- your web app URL
+// script.js — JSONP client (replace the entire file in your repo)
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzmmfEl_YmtAu7x0vrMPeX4lhmfQhnRxdAHpDGSXJwGEOMclejSSWSNiNE6vJJWs1z-sA/exec';
 
 /* helpers */
 const popup = () => document.getElementById('quickOrderPopup');
@@ -11,35 +10,42 @@ const cancelBtn = () => document.getElementById('quickCancel');
 const closeAfterBtn = () => document.getElementById('quickCloseAfter');
 
 function scrollToProduct(){ const el = document.getElementById('product'); if(el) el.scrollIntoView({behavior:'smooth'}); }
-
-function openQuickOrder(productName=''){
-  const p = popup(); if(!p) return;
-  p.classList.add('open'); p.setAttribute('aria-hidden','false');
-  const hidden = document.getElementById('quickProduct'); if(hidden) hidden.value = productName;
-  const f = form(); if(f){ f.hidden = false; f.reset(); }
-  const s = successBox(); if(s) s.hidden = true;
-  document.body.style.overflow = 'hidden';
-}
-
-function closeQuickOrder(){
-  const p = popup(); if(!p) return;
-  p.classList.remove('open'); p.setAttribute('aria-hidden','true');
-  document.body.style.overflow = 'auto';
-}
-
-function wireProductButtons(){
-  document.querySelectorAll('.product-btn').forEach(btn => {
-    btn.removeEventListener('click', onProductClick);
-    btn.addEventListener('click', onProductClick);
-  });
-}
-function onProductClick(e){
-  const product = e.currentTarget.dataset.product || '';
-  openQuickOrder(product);
-}
-
+function openQuickOrder(productName=''){ const p = popup(); if(!p) return; p.classList.add('open'); p.setAttribute('aria-hidden','false'); const hidden = document.getElementById('quickProduct'); if(hidden) hidden.value = productName; const f = form(); if(f){ f.hidden = false; f.reset(); } const s = successBox(); if(s) s.hidden = true; document.body.style.overflow = 'hidden'; }
+function closeQuickOrder(){ const p = popup(); if(!p) return; p.classList.remove('open'); p.setAttribute('aria-hidden','true'); document.body.style.overflow = 'auto'; }
+function wireProductButtons(){ document.querySelectorAll('.product-btn').forEach(btn => { btn.removeEventListener('click', onProductClick); btn.addEventListener('click', onProductClick); }); }
+function onProductClick(e){ const product = e.currentTarget.dataset.product || ''; openQuickOrder(product); }
 function validPhone(phone){ const d = (phone||'').replace(/\D/g,''); return /^\d{10}$/.test(d); }
 
+/* JSONP helper */
+function submitViaJSONP(payload, cb) {
+  const cbName = '__gup_order_cb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+  window[cbName] = function(data) {
+    try { cb(null, data); } catch(e) { cb(e); }
+    try { delete window[cbName]; } catch(e) {}
+    const el = document.getElementById(cbName);
+    if (el) el.remove();
+  };
+
+  const urlBase = GOOGLE_SCRIPT_URL;
+  const params = new URLSearchParams();
+  params.append('callback', cbName);
+  params.append('product', payload.product || '');
+  params.append('name', payload.name || '');
+  params.append('class', payload.class || '');
+  params.append('admission', payload.admission || '');
+  params.append('phone', payload.phone || '');
+  params.append('_ts', Date.now());
+
+  const fullUrl = urlBase + '?' + params.toString();
+
+  const script = document.createElement('script');
+  script.src = fullUrl;
+  script.id = cbName;
+  script.onerror = function(){ try{ delete window[cbName]; } catch(e){} script.remove(); cb(new Error('JSONP load error')); };
+  document.body.appendChild(script);
+}
+
+/* Form submit handler */
 async function handleSubmit(e){
   e.preventDefault();
   const submitBtn = document.getElementById('quickSubmit');
@@ -69,55 +75,26 @@ async function handleSubmit(e){
   if(Date.now()-last < 7000){ alert('Please wait a moment before another order.'); if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Place Order'; } return; }
   localStorage.setItem('lastQuickOrderAt', Date.now());
 
-  // Developer safety: quick sanity
-  if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('YOUR_DEPLOYMENT_ID') || GOOGLE_SCRIPT_URL.trim() === '') {
-    alert('Set GOOGLE_SCRIPT_URL in script.js to your deployed Apps Script web app URL.');
-    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Place Order'; }
-    return;
-  }
-
-  // Build form-encoded params to avoid preflight (application/x-www-form-urlencoded)
-  const params = new URLSearchParams();
-  params.append('product', payload.product);
-  params.append('name', payload.name);
-  params.append('class', payload.class);
-  params.append('admission', payload.admission);
-  params.append('phone', payload.phone);
-
   try {
-    console.log('Posting order to:', GOOGLE_SCRIPT_URL);
-    const res = await fetch(GOOGLE_SCRIPT_URL, {
-      method: 'POST',
-      body: params // browser sends as application/x-www-form-urlencoded by default
-    });
-
-    // If the server returns non-2xx, res.ok will be false
-    if (!res.ok) {
-      throw new Error('Server responded with status ' + res.status);
-    }
-
-    // Try to parse JSON (Apps Script returns JSON)
-    let data;
-    try {
-      data = await res.json();
-    } catch (jsonErr) {
-      // If parsing fails, still treat as failure because we expect JSON {status:'ok'}
-      throw new Error('Invalid JSON response from server');
-    }
-
-    if (data && data.status === 'ok') {
-      // Success UI
-      const f = form(); if(f) f.hidden = true;
-      const s = successBox(); if(s) s.hidden = false;
-      setTimeout(() => {
+    submitViaJSONP(payload, function(err, data){
+      if (err) {
+        console.error('JSONP submit error', err);
+        alert('Could not place order now. Try again later.');
         if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Place Order'; }
-      }, 800);
-      setTimeout(closeQuickOrder, 1400);
-      console.log('Order successful:', data);
-    } else {
-      throw new Error((data && data.message) ? data.message : 'Server rejected request');
-    }
-
+        return;
+      }
+      if (data && data.status === 'ok') {
+        const f = form(); if(f) f.hidden = true;
+        const s = successBox(); if(s) s.hidden = false;
+        setTimeout(()=> { if (submitBtn) { submitBtn.disabled=false; submitBtn.textContent='Place Order'; } }, 800);
+        setTimeout(closeQuickOrder, 1400);
+        console.log('Order successful (JSONP)');
+      } else {
+        console.error('Server rejected JSONP response', data);
+        alert('Server returned error. Try again later.');
+        if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Place Order'; }
+      }
+    });
   } catch (err) {
     console.error('Order error', err);
     alert('Could not place order now. See console for details.');
@@ -125,6 +102,7 @@ async function handleSubmit(e){
   }
 }
 
+/* Init */
 document.addEventListener('DOMContentLoaded', () => {
   wireProductButtons();
   const f = form(); if(f) f.addEventListener('submit', handleSubmit);
