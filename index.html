@@ -174,6 +174,19 @@
     </div>
   </div>
 
+  <!-- HIDDEN FORM + IFRAME (no CORS preflight) -->
+  <iframe name="hidden_iframe" id="hidden_iframe" style="display:none;"></iframe>
+
+  <form id="hiddenOrderForm"
+        action="https://script.google.com/macros/s/AKfycbzmmfEl_YmtAu7x0vrMPeX4lhmfQhnRxdAHpDGSXJwGEOMclejSSWSNiNE6vJJWs1z-sA/exec"
+        method="POST" target="hidden_iframe" style="display:none;">
+    <input type="hidden" name="product" id="hf_product">
+    <input type="hidden" name="name" id="hf_name">
+    <input type="hidden" name="class" id="hf_class">
+    <input type="hidden" name="admission" id="hf_admission">
+    <input type="hidden" name="phone" id="hf_phone">
+  </form>
+
   <script src="script.js" defer></script>
 </body>
 </html>
